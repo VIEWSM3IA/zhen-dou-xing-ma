@@ -258,6 +258,52 @@ test("result: confirm is ignored unless PASS and successful confirm becomes CONF
   assert.equal(page.data.content, "周六 18:30 吃饭");
 });
 
+test("result: READY closes once and reveals only the frozen signal", async () => {
+  const wx = createWx({
+    "proposal:proposal-1": {
+      id: "proposal-1",
+      revisionId: "revision-1",
+      shareToken: "share-1",
+      version: 1,
+      content: "周六 18:30 吃饭",
+    },
+  });
+  const gate = deferred();
+  let closeCalls = 0;
+  const api = {
+    closeProposal(id) {
+      assert.equal(id, "proposal-1");
+      closeCalls += 1;
+      return gate.promise;
+    },
+  };
+  const page = loadPage("miniprogram/pages/result/index.js", api, wx);
+  page.setData({
+    proposalId: "proposal-1",
+    revisionId: "revision-1",
+    status: "READY",
+    loading: false,
+  });
+  page.confirm();
+  page.closeAndReveal();
+  page.closeAndReveal();
+  assert.equal(closeCalls, 1);
+  assert.equal(page.data.closing, true);
+  gate.resolve({
+    proposalId: "proposal-1",
+    revisionId: "revision-1",
+    version: 1,
+    content: "周六 18:30 吃饭",
+    lifecycle: "CLOSED",
+    status: "ADJUST",
+  });
+  await waitFor(() => page.data.status === "ADJUST");
+  assert.equal(page.data.closing, false);
+  assert.equal(page.data.statusMeta.label, "建议调整");
+  page.closeAndReveal();
+  assert.equal(closeCalls, 1);
+});
+
 test("result: 410 EXPIRED clears previously visible content and exposes no historical result", async () => {
   const wx = createWx();
 

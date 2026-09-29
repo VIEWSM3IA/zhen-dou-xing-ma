@@ -28,6 +28,10 @@
   background: #4d5661;
 }
 
+.signal-card--ready {
+  background: #414b56;
+}
+
 .signal-card--pass {
   background: #18231d;
 }

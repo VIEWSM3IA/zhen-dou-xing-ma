@@ -72,6 +72,8 @@ function requestCore({
           ALREADY_SUBMITTED: "你已经匿名确认过这个方案了",
           REVISION_MISMATCH: "方案已更新，请重新选择",
           NOT_OPEN: "这次确认已经结束",
+          NOT_READY: "还需要更多人确认",
+          NOT_PASS: "当前方案还不能确认",
           EXPIRED: "这次确认已经结束",
         };
         const message =
@@ -182,6 +184,14 @@ function confirmProposal(proposalId) {
   });
 }
 
+function closeProposal(proposalId) {
+  return authedRequest({
+    path: "/v1/proposals/" + encode(proposalId) + "/close",
+    method: "POST",
+    data: {},
+  });
+}
+
 module.exports = {
   ensureAuth,
   createProposal,
@@ -189,5 +199,6 @@ module.exports = {
   respond,
   getResult,
   reviseProposal,
+  closeProposal,
   confirmProposal,
 };
