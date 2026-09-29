@@ -228,19 +228,27 @@ function getBearer(req) {
   return match[1];
 }
 
-function proposalResultStatus(db, revisionId) {
+function revisionResponseCount(db, revisionId) {
+  return db
+    .prepare(
+      "SELECT COUNT(*) AS total FROM anonymous_response WHERE revision_id = ?",
+    )
+    .get(revisionId).total;
+}
+
+function computeFrozenResult(db, revisionId) {
   const counts = db
     .prepare(
       `
-  SELECT COUNT(*) AS total,
-    SUM(CASE WHEN response = 'BLOCKED' THEN 1 ELSE 0 END) AS blocked,
-    SUM(CASE WHEN response = 'DIFFICULT' THEN 1 ELSE 0 END) AS difficult
-  FROM anonymous_response WHERE revision_id = ?
-`,
+    SELECT COUNT(*) AS total,
+      SUM(CASE WHEN response = 'BLOCKED' THEN 1 ELSE 0 END) AS blocked,
+      SUM(CASE WHEN response = 'DIFFICULT' THEN 1 ELSE 0 END) AS difficult
+    FROM anonymous_response WHERE revision_id = ?
+  `,
     )
     .get(revisionId);
 
-  if (counts.total < 4) return "WAITING";
+  if (counts.total < 4) throw new HttpError(409, "NOT_READY");
   if (counts.blocked >= 1) return "BLOCKED";
   if (counts.difficult >= 2) return "ADJUST";
   return "PASS";
@@ -317,8 +325,11 @@ CREATE TABLE IF NOT EXISTS revisions (
   version INTEGER NOT NULL CHECK (version >= 1),
   content TEXT NOT NULL,
   status TEXT NOT NULL
-    CHECK (status IN ('OPEN', 'SUPERSEDED', 'CONFIRMED')),
+    CHECK (status IN ('OPEN', 'CLOSED', 'SUPERSEDED', 'CONFIRMED')),
   created_at INTEGER NOT NULL,
+  closed_at INTEGER,
+  frozen_result TEXT
+    CHECK (frozen_result IS NULL OR frozen_result IN ('PASS', 'ADJUST', 'BLOCKED')),
   FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE,
   UNIQUE (proposal_id, version)
 ) STRICT;
@@ -348,6 +359,118 @@ CREATE INDEX IF NOT EXISTS anonymous_response_revision_id_idx
   ON anonymous_response(revision_id);
 
 `);
+}
+
+function migrateRevisionsV2(db, nowMs) {
+  const foreignKeysRow = db.prepare("PRAGMA foreign_keys").get();
+  const foreignKeysWereOn = Number(foreignKeysRow.foreign_keys) === 1;
+
+  const columns = db.prepare("PRAGMA table_info(revisions)").all();
+  const columnNames = new Set(columns.map((column) => column.name));
+  const alreadyV2 =
+    columnNames.has("closed_at") && columnNames.has("frozen_result");
+
+  db.exec("PRAGMA foreign_keys = OFF");
+
+  try {
+    db.exec("BEGIN IMMEDIATE");
+
+    if (!alreadyV2) {
+      db.exec(`
+        CREATE TABLE revisions_v2_new (
+          id TEXT PRIMARY KEY,
+          proposal_id TEXT NOT NULL,
+          version INTEGER NOT NULL CHECK (version >= 1),
+          content TEXT NOT NULL,
+          status TEXT NOT NULL
+            CHECK (status IN ('OPEN', 'CLOSED', 'SUPERSEDED', 'CONFIRMED')),
+          created_at INTEGER NOT NULL,
+          closed_at INTEGER,
+          frozen_result TEXT
+            CHECK (
+              frozen_result IS NULL OR
+              frozen_result IN ('PASS', 'ADJUST', 'BLOCKED')
+            ),
+          FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE,
+          UNIQUE (proposal_id, version)
+        ) STRICT
+      `);
+
+      const insert = db.prepare(`
+        INSERT INTO revisions_v2_new (
+          id,
+          proposal_id,
+          version,
+          content,
+          status,
+          created_at,
+          closed_at,
+          frozen_result
+        )
+        SELECT
+          r.id,
+          r.proposal_id,
+          r.version,
+          r.content,
+          r.status,
+          r.created_at,
+          CASE
+            WHEN r.status = 'CONFIRMED'
+              THEN COALESCE(
+                (
+                  SELECT p.confirmed_at
+                  FROM proposals AS p
+                  WHERE p.id = r.proposal_id
+                ),
+                ?
+              )
+            ELSE NULL
+          END,
+          CASE
+            WHEN r.status = 'CONFIRMED' THEN 'PASS'
+            ELSE NULL
+          END
+        FROM revisions AS r
+      `);
+      insert.run(nowMs);
+
+      db.exec(`
+        DROP TABLE revisions;
+        ALTER TABLE revisions_v2_new RENAME TO revisions;
+      `);
+    }
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS revisions_proposal_id_idx
+        ON revisions(proposal_id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS revisions_one_open_per_proposal_idx
+        ON revisions(proposal_id)
+        WHERE status = 'OPEN';
+
+      PRAGMA user_version = 2;
+    `);
+
+    const violations = db.prepare("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error("Foreign key check failed after revisions V2 migration");
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // No active transaction.
+    }
+    throw error;
+  } finally {
+    db.exec(
+      foreignKeysWereOn
+        ? "PRAGMA foreign_keys = ON"
+        : "PRAGMA foreign_keys = OFF",
+    );
+  }
 }
 
 function createSession(db, aesKey, openid, ts, sessionTtlMs) {
@@ -380,7 +503,7 @@ function cleanup(db, ts) {
       `
   UPDATE revisions
   SET status = 'SUPERSEDED'
-  WHERE status = 'OPEN'
+  WHERE status IN ('OPEN', 'CLOSED')
     AND id IN (
       SELECT current_revision_id
       FROM proposals
@@ -400,6 +523,8 @@ function cleanup(db, ts) {
     JOIN proposals AS p
       ON p.id = r.proposal_id
     WHERE
+      (r.closed_at IS NOT NULL AND r.closed_at <= ?)
+      OR
       (
         r.status = 'CONFIRMED'
         AND p.confirmed_at IS NOT NULL
@@ -425,7 +550,7 @@ function cleanup(db, ts) {
       )
   )
 `,
-    ).run(answerCutoff, answerCutoff, answerCutoff);
+    ).run(answerCutoff, answerCutoff, answerCutoff, answerCutoff);
 
     db.prepare(
       `
@@ -479,7 +604,7 @@ function requireCreator(proposal, creatorKey, openid) {
 function getProposalWithCurrentRevision(db, proposalId) {
   return db
     .prepare(
-      "SELECT p.id, p.creator_hmac, p.share_token_hash, p.current_revision_id, p.status AS proposal_status, p.created_at AS proposal_created_at, p.expires_at, p.confirmed_at, r.id AS revision_id, r.version, r.content, r.status AS revision_status, r.created_at AS revision_created_at FROM proposals AS p JOIN revisions AS r ON r.id = p.current_revision_id WHERE p.id = ?",
+      "SELECT p.id, p.creator_hmac, p.share_token_hash, p.current_revision_id, p.status AS proposal_status, p.created_at AS proposal_created_at, p.expires_at, p.confirmed_at, r.id AS revision_id, r.version, r.content, r.status AS revision_status, r.created_at AS revision_created_at, r.closed_at, r.frozen_result FROM proposals AS p JOIN revisions AS r ON r.id = p.current_revision_id WHERE p.id = ?",
     )
     .get(proposalId);
 }
@@ -503,6 +628,10 @@ function shareLifecycle(db, guardKey, openid, proposal) {
 
   if (proposal.proposal_status === "EXPIRED") {
     return "EXPIRED";
+  }
+
+  if (proposal.revision_status === "CLOSED") {
+    return "CLOSED";
   }
 
   const guard = guardHmac(guardKey, openid, proposal.revision_id);
@@ -637,6 +766,7 @@ export function createServer({
 
   const db = new DatabaseSync(dbPath);
   createSchema(db);
+  migrateRevisionsV2(db, nowMs(now));
 
   const cleanupTimer = setInterval(() => {
     try {
@@ -918,7 +1048,7 @@ export function createServer({
           if (
             proposal.proposal_status !== "OPEN" ||
             proposal.expires_at <= ts ||
-            proposal.revision_status !== "OPEN"
+            !["OPEN", "CLOSED"].includes(proposal.revision_status)
           ) {
             throw new HttpError(409, "NOT_OPEN");
           }
@@ -932,7 +1062,7 @@ export function createServer({
         UPDATE revisions
         SET status = 'SUPERSEDED'
         WHERE id = ?
-          AND status = 'OPEN'
+          AND status IN ('OPEN', 'CLOSED')
       `,
             )
             .run(proposal.revision_id);
@@ -998,12 +1128,36 @@ export function createServer({
           throw new HttpError(410, "EXPIRED");
         }
 
-        const lifecycle =
-          proposal.proposal_status === "CONFIRMED" ? "CONFIRMED" : "OPEN";
-        const status =
-          lifecycle === "CONFIRMED"
-            ? "PASS"
-            : proposalResultStatus(db, proposal.revision_id);
+        let lifecycle;
+        let status;
+        if (proposal.proposal_status === "CONFIRMED") {
+          if (
+            proposal.revision_status !== "CONFIRMED" ||
+            proposal.frozen_result !== "PASS"
+          ) {
+            throw new HttpError(500, "INVALID_STATE");
+          }
+          lifecycle = "CONFIRMED";
+          status = proposal.frozen_result;
+        } else if (
+          proposal.proposal_status === "OPEN" &&
+          proposal.revision_status === "OPEN"
+        ) {
+          const ready = revisionResponseCount(db, proposal.revision_id) >= 4;
+          lifecycle = ready ? "READY" : "OPEN";
+          status = ready ? "READY" : "WAITING";
+        } else if (
+          proposal.proposal_status === "OPEN" &&
+          proposal.revision_status === "CLOSED"
+        ) {
+          if (!["PASS", "ADJUST", "BLOCKED"].includes(proposal.frozen_result)) {
+            throw new HttpError(500, "INVALID_STATE");
+          }
+          lifecycle = "CLOSED";
+          status = proposal.frozen_result;
+        } else {
+          throw new HttpError(409, "NOT_OPEN");
+        }
 
         json(res, 200, {
           content: proposal.content,
@@ -1012,6 +1166,64 @@ export function createServer({
           lifecycle,
           status,
         });
+        return;
+      }
+
+      const closeMatch =
+        /^\/v1\/proposals\/([A-Za-z0-9_-]{10,128})\/close$/.exec(path);
+
+      if (method === "POST" && closeMatch) {
+        const body = await readJson(req, { allowEmpty: true });
+        assertExactKeys(body, []);
+
+        const card = withTransaction(db, () => {
+          const proposal = getProposalWithCurrentRevision(db, closeMatch[1]);
+          requireCreator(proposal, creatorKey, openid);
+
+          if (
+            proposal.proposal_status === "EXPIRED" ||
+            proposal.expires_at <= ts
+          ) {
+            throw new HttpError(410, "EXPIRED");
+          }
+          if (proposal.proposal_status !== "OPEN") {
+            throw new HttpError(409, "NOT_OPEN");
+          }
+
+          if (proposal.revision_status === "CLOSED") {
+            if (
+              !["PASS", "ADJUST", "BLOCKED"].includes(proposal.frozen_result)
+            ) {
+              throw new HttpError(500, "INVALID_STATE");
+            }
+          } else if (proposal.revision_status === "OPEN") {
+            const frozenResult = computeFrozenResult(db, proposal.revision_id);
+            const changed = db
+              .prepare(
+                `
+              UPDATE revisions
+              SET status = 'CLOSED', closed_at = ?, frozen_result = ?
+              WHERE id = ? AND status = 'OPEN'
+            `,
+              )
+              .run(ts, frozenResult, proposal.revision_id);
+            if (changed.changes !== 1) throw new HttpError(409, "CONFLICT");
+            proposal.frozen_result = frozenResult;
+          } else {
+            throw new HttpError(409, "NOT_OPEN");
+          }
+
+          return {
+            proposalId: proposal.id,
+            revisionId: proposal.revision_id,
+            content: proposal.content,
+            version: proposal.version,
+            lifecycle: "CLOSED",
+            status: proposal.frozen_result,
+          };
+        });
+
+        json(res, 200, card);
         return;
       }
 
@@ -1031,14 +1243,12 @@ export function createServer({
           if (
             proposal.proposal_status !== "OPEN" ||
             proposal.expires_at <= ts ||
-            proposal.revision_status !== "OPEN"
+            proposal.revision_status !== "CLOSED"
           ) {
             throw new HttpError(409, "NOT_OPEN");
           }
 
-          const resultStatus = proposalResultStatus(db, proposal.revision_id);
-
-          if (resultStatus !== "PASS") {
+          if (proposal.frozen_result !== "PASS") {
             throw new HttpError(409, "NOT_PASS");
           }
 
@@ -1066,7 +1276,7 @@ export function createServer({
         UPDATE revisions
         SET status = 'CONFIRMED'
         WHERE id = ?
-          AND status = 'OPEN'
+          AND status = 'CLOSED'
       `,
             )
             .run(proposal.revision_id);
@@ -1080,7 +1290,8 @@ export function createServer({
             revisionId: proposal.revision_id,
             content: proposal.content,
             version: proposal.version,
-            status: "CONFIRMED",
+            lifecycle: "CONFIRMED",
+            status: "PASS",
           };
         });
 

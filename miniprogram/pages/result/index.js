@@ -11,6 +11,12 @@ const STATUS_COPY = {
     copy: "为了避免小群体中通过结果猜到具体是谁，至少需要 4 人完成匿名确认。",
     tone: "waiting",
   },
+  READY: {
+    label: "可以查看",
+    title: "匿名门槛已满足",
+    copy: "结束本轮收集后，系统才会生成并锁定行动结论。结束后将不再接受新的回答。",
+    tone: "ready",
+  },
   PASS: {
     label: "可以推进",
     title: "当前方案可以推进",
@@ -54,6 +60,7 @@ Page({
     shareToken: "",
     loading: true,
     confirming: false,
+    closing: false,
     error: "",
   },
 
@@ -213,6 +220,38 @@ Page({
           confirming: false,
           error:
             error && error.message ? error.message : "确认失败，请刷新后重试",
+        });
+      });
+  },
+
+  closeAndReveal() {
+    if (this.data.closing || this.data.status !== "READY") {
+      return;
+    }
+
+    this.setData({ closing: true, error: "" });
+    api
+      .closeProposal(this.data.proposalId)
+      .then((body) => {
+        this.cacheProposal(body);
+        const status = body.status;
+        this.setData({
+          content: body.content || this.data.content,
+          revisionId: body.revisionId || this.data.revisionId,
+          version: Number(body.version) || this.data.version,
+          status,
+          statusMeta: STATUS_COPY[status] || null,
+          closing: false,
+          error: "",
+        });
+      })
+      .catch((error) => {
+        this.setData({
+          closing: false,
+          error:
+            error && error.message
+              ? error.message
+              : "结束收集失败，请刷新后重试",
         });
       });
   },

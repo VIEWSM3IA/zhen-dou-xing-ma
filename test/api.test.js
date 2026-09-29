@@ -14,11 +14,11 @@ function makeEnv(overrides = {}) {
   return {
     NODE_ENV: "development",
     DEV_AUTH_ENABLED: "1",
-    WECHAT_APP_ID: "test-app-id",
+    WECHAT_APPID: "test-app-id",
     WECHAT_APP_SECRET: "test-app-secret",
-    SESSION_ENCRYPTION_KEY_BASE64: randomBytes(32).toString("base64"),
-    CREATOR_HMAC_SECRET: randomBytes(32).toString("hex"),
-    GUARD_HMAC_SECRET: randomBytes(32).toString("hex"),
+    SESSION_AES_KEY: randomBytes(32).toString("base64"),
+    CREATOR_HMAC_KEY: randomBytes(32).toString("hex"),
+    GUARD_HMAC_KEY: randomBytes(32).toString("hex"),
     ...overrides,
   };
 }
@@ -109,7 +109,25 @@ async function harness(t) {
     return request(`/v1/proposals/${encodeURIComponent(id)}/result`, { token });
   }
 
-  return { clock, dbPath, request, auth, proposal, share, respond, result };
+  async function close(id, token) {
+    return request(`/v1/proposals/${encodeURIComponent(id)}/close`, {
+      method: "POST",
+      token,
+      body: {},
+    });
+  }
+
+  return {
+    clock,
+    dbPath,
+    request,
+    auth,
+    proposal,
+    share,
+    respond,
+    result,
+    close,
+  };
 }
 
 async function addResponses(h, shareToken, revisionId, prefix, values) {
@@ -120,7 +138,7 @@ async function addResponses(h, shareToken, revisionId, prefix, values) {
   }
 }
 
-test("result thresholds: <4 WAITING, PASS, ADJUST and BLOCKED", async (t) => {
+test("open result reveals only WAITING or READY; close freezes the signal", async (t) => {
   const h = await harness(t);
   const creator = await h.auth("creator-thresholds");
 
@@ -153,11 +171,144 @@ test("result thresholds: <4 WAITING, PASS, ADJUST and BLOCKED", async (t) => {
 
     const res = await h.result(p.id, creator);
     assert.equal(res.status, 200);
-    assert.equal(res.body.status, c.expected);
+    assert.equal(
+      res.body.status,
+      c.expected === "WAITING" ? "WAITING" : "READY",
+    );
+    assert.equal(
+      res.body.lifecycle,
+      c.expected === "WAITING" ? "OPEN" : "READY",
+    );
     assert.equal(res.body.content, `方案-${c.name}`);
     assert.equal(res.body.revisionId, p.revisionId);
     assert.equal(res.body.version, 1);
+
+    const closed = await h.close(p.id, creator);
+    if (c.expected === "WAITING") {
+      assert.equal(closed.status, 409);
+      assert.deepEqual(closed.body, { error: "NOT_READY" });
+      assert.equal((await h.result(p.id, creator)).body.status, "WAITING");
+    } else {
+      assert.equal(closed.status, 200);
+      assert.equal(closed.body.lifecycle, "CLOSED");
+      assert.equal(closed.body.status, c.expected);
+      assert.equal((await h.result(p.id, creator)).body.status, c.expected);
+    }
   }
+});
+
+test("READY stays neutral until close, then close is stable and stops answers", async (t) => {
+  const h = await harness(t);
+  const creator = await h.auth("creator-freeze");
+  const p = await h.proposal(creator);
+  await addResponses(h, p.shareToken, p.revisionId, "freeze", [
+    "OK",
+    "OK",
+    "BLOCKED",
+    "OK",
+  ]);
+
+  const ready = await h.result(p.id, creator);
+  assert.equal(ready.body.status, "READY");
+  assert.equal(ready.body.lifecycle, "READY");
+  assert.deepEqual(
+    Object.keys(ready.body).sort(),
+    ["content", "revisionId", "version", "lifecycle", "status"].sort(),
+  );
+
+  const fifth = await h.auth("fifth-freeze");
+  assert.equal(
+    (await h.respond(p.shareToken, fifth, p.revisionId, "DIFFICULT")).status,
+    200,
+  );
+  assert.equal((await h.result(p.id, creator)).body.status, "READY");
+
+  const first = await h.close(p.id, creator);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.lifecycle, "CLOSED");
+  assert.equal(first.body.status, "BLOCKED");
+  const second = await h.close(p.id, creator);
+  assert.deepEqual(second.body, first.body);
+
+  const page = await h.share(p.shareToken, fifth);
+  assert.equal(page.body.lifecycle, "CLOSED");
+  assert.deepEqual(
+    Object.keys(page.body).sort(),
+    [
+      "proposalId",
+      "revisionId",
+      "content",
+      "version",
+      "lifecycle",
+      "submitted",
+    ].sort(),
+  );
+  const late = await h.auth("late-freeze");
+  assert.equal(
+    (await h.respond(p.shareToken, late, p.revisionId, "OK")).status,
+    409,
+  );
+
+  const db = new DatabaseSync(h.dbPath);
+  t.after(() => db.close());
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM anonymous_response").get().n,
+    5,
+  );
+  h.clock.value += 24 * HOUR + 1;
+  assert.equal((await h.result(p.id, creator)).body.status, "BLOCKED");
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM anonymous_response").get().n,
+    0,
+  );
+  h.clock.value += 24 * HOUR;
+  assert.deepEqual((await h.share(p.shareToken, fifth)).body, {
+    error: "EXPIRED",
+  });
+  assert.deepEqual((await h.result(p.id, creator)).body, { error: "EXPIRED" });
+});
+
+test("CLOSED adjustment can be revised without carrying answers", async (t) => {
+  const h = await harness(t);
+  const creator = await h.auth("creator-closed-revision");
+  const voter = await h.auth("voter-closed-revision");
+  const p = await h.proposal(creator);
+  await addResponses(h, p.shareToken, p.revisionId, "closed-revise", [
+    "DIFFICULT",
+    "DIFFICULT",
+    "OK",
+    "OK",
+  ]);
+  assert.equal((await h.close(p.id, creator)).body.status, "ADJUST");
+  const prematureConfirm = await h.request(`/v1/proposals/${p.id}/confirm`, {
+    method: "POST",
+    token: creator,
+    body: {},
+  });
+  assert.equal(prematureConfirm.status, 409);
+  assert.deepEqual(prematureConfirm.body, { error: "NOT_PASS" });
+
+  const revised = await h.request(`/v1/proposals/${p.id}/revisions`, {
+    method: "POST",
+    token: creator,
+    body: { content: "新的可执行方案" },
+  });
+  assert.equal(revised.status, 201);
+  assert.equal(revised.body.version, 2);
+  const current = await h.share(p.shareToken, voter);
+  assert.equal(current.body.revisionId, revised.body.revisionId);
+  assert.equal(current.body.lifecycle, "OPEN");
+  assert.equal(current.body.submitted, false);
+  assert.equal((await h.result(p.id, creator)).body.status, "WAITING");
+  assert.equal(
+    (await h.respond(p.shareToken, voter, p.revisionId, "OK")).status,
+    409,
+  );
+  assert.equal(
+    (await h.respond(p.shareToken, voter, revised.body.revisionId, "OK"))
+      .status,
+    200,
+  );
 });
 
 test("duplicate response is rejected with 409", async (t) => {
@@ -229,6 +380,9 @@ test("noncreator cannot read proposal result", async (t) => {
   const forbidden = await h.result(p.id, other);
   assert.equal(forbidden.status, 403);
 
+  const close = await h.close(p.id, other);
+  assert.equal(close.status, 403);
+
   const revise = await h.request(`/v1/proposals/${p.id}/revisions`, {
     method: "POST",
     token: other,
@@ -282,7 +436,18 @@ test("PASS can be confirmed and confirmed proposal rejects further responses", a
 
   const before = await h.result(p.id, creator);
   assert.equal(before.status, 200);
-  assert.equal(before.body.status, "PASS");
+  assert.equal(before.body.status, "READY");
+
+  const earlyConfirm = await h.request(`/v1/proposals/${p.id}/confirm`, {
+    method: "POST",
+    token: creator,
+    body: {},
+  });
+  assert.equal(earlyConfirm.status, 409);
+
+  const closed = await h.close(p.id, creator);
+  assert.equal(closed.status, 200);
+  assert.equal(closed.body.status, "PASS");
 
   const confirm = await h.request(`/v1/proposals/${p.id}/confirm`, {
     method: "POST",
@@ -493,6 +658,8 @@ test("guard and answers remain separate, and cleanup preserves confirmed card", 
   assert.deepEqual(guardFields, ["guard_hmac", "submitted_at"]);
   assert.deepEqual(answerFields, ["revision_id", "response", "created_at"]);
 
+  assert.equal((await h.close(p.id, creator)).body.status, "PASS");
+
   const confirmed = await h.request(`/v1/proposals/${p.id}/confirm`, {
     method: "POST",
     token: creator,
@@ -537,9 +704,120 @@ test("expired result hides historical answer state", async (t) => {
     "OK",
     "OK",
   ]);
-  assert.equal((await h.result(p.id, creator)).body.status, "PASS");
+  assert.equal((await h.result(p.id, creator)).body.status, "READY");
   h.clock.value += 48 * HOUR + 1;
   const result = await h.result(p.id, creator);
   assert.equal(result.status, 410);
   assert.deepEqual(result.body, { error: "EXPIRED" });
+});
+
+test("old database migrates once and keeps confirmed result frozen", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "proposal-migration-"));
+  const dbPath = join(dir, "old.sqlite");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const oldDb = new DatabaseSync(dbPath);
+  oldDb.exec(`
+    CREATE TABLE proposals (
+      id TEXT PRIMARY KEY, creator_hmac TEXT NOT NULL,
+      share_token_hash TEXT NOT NULL UNIQUE,
+      current_revision_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('OPEN', 'CONFIRMED', 'EXPIRED')),
+      created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+      confirmed_at INTEGER
+    ) STRICT;
+    CREATE TABLE revisions (
+      id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      content TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('OPEN', 'SUPERSEDED', 'CONFIRMED')),
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE,
+      UNIQUE (proposal_id, version)
+    ) STRICT;
+  `);
+  const confirmedAt = START - HOUR;
+  oldDb
+    .prepare(`INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(
+      "confirmed-proposal",
+      "creator",
+      "share-confirmed",
+      "confirmed-revision",
+      "CONFIRMED",
+      START - 2 * HOUR,
+      START + 46 * HOUR,
+      confirmedAt,
+    );
+  oldDb
+    .prepare(`INSERT INTO revisions VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(
+      "confirmed-revision",
+      "confirmed-proposal",
+      1,
+      "已确认的旧方案",
+      "CONFIRMED",
+      START - 2 * HOUR,
+    );
+  oldDb
+    .prepare(`INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(
+      "open-proposal",
+      "creator",
+      "share-open",
+      "open-revision",
+      "OPEN",
+      START - HOUR,
+      START + 47 * HOUR,
+      null,
+    );
+  oldDb
+    .prepare(`INSERT INTO revisions VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(
+      "open-revision",
+      "open-proposal",
+      1,
+      "仍在收集的旧方案",
+      "OPEN",
+      START - HOUR,
+    );
+  oldDb.close();
+
+  for (let i = 0; i < 2; i += 1) {
+    const server = createServer({ env: makeEnv(), dbPath, now: () => START });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise((resolve) => server.close(resolve));
+
+    const db = new DatabaseSync(dbPath);
+    assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(
+            "SELECT status, closed_at, frozen_result FROM revisions WHERE id = 'confirmed-revision'",
+          )
+          .get(),
+      },
+      { status: "CONFIRMED", closed_at: confirmedAt, frozen_result: "PASS" },
+    );
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(
+            "SELECT status, closed_at, frozen_result FROM revisions WHERE id = 'open-revision'",
+          )
+          .get(),
+      },
+      { status: "OPEN", closed_at: null, frozen_result: null },
+    );
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.throws(() =>
+      db
+        .prepare(
+          "INSERT INTO revisions VALUES ('bad-revision', 'missing', 1, 'x', 'OPEN', 1, NULL, NULL)",
+        )
+        .run(),
+    );
+    db.close();
+  }
 });

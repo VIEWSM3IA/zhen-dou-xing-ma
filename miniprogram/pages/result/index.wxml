@@ -35,6 +35,14 @@
     <view wx:if="{{error}}" class="error-box">{{error}}</view>
 
     <button
+      wx:if="{{status == 'READY'}}"
+      class="primary-button"
+      loading="{{closing}}"
+      disabled="{{closing}}"
+      bindtap="closeAndReveal"
+    >结束收集并查看结论</button>
+
+    <button
       wx:if="{{status == 'PASS'}}"
       class="primary-button"
       loading="{{confirming}}"
