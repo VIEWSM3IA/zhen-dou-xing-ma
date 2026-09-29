@@ -1,0 +1,69 @@
+.proposal-card {
+  margin-top: 32rpx;
+}
+
+.proposal-caption {
+  margin-bottom: 14rpx;
+  color: #858c95;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+.proposal-content {
+  color: #15181d;
+  font-size: 32rpx;
+  font-weight: 620;
+  line-height: 1.6;
+}
+
+.signal-card {
+  margin-top: 24rpx;
+  padding: 36rpx 32rpx;
+  border-radius: 28rpx;
+  background: #171a1f;
+  color: #ffffff;
+}
+
+.signal-card--waiting {
+  background: #4d5661;
+}
+
+.signal-card--pass {
+  background: #18231d;
+}
+
+.signal-card--adjust {
+  background: #2e2a20;
+}
+
+.signal-card--blocked {
+  background: #2d2021;
+}
+
+.signal-card--confirmed {
+  background: #17221e;
+}
+
+.signal-label {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 24rpx;
+  font-weight: 650;
+}
+
+.signal-title {
+  margin-top: 16rpx;
+  font-size: 38rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.signal-copy {
+  margin-top: 16rpx;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 27rpx;
+  line-height: 1.65;
+}
+
+.signal-card--expired {
+  background: #34383d;
+}

@@ -1,20 +1,41 @@
-# project_3
+# 真都行吗？V0.1
 
-Independent project initialized with the shared Codex agent engineering environment.
+微信群形成具体方案后，成员分别匿名确认它能否执行。发起人只看到行动信号，不会看到人数、选项计数、参与者或个人回答。
 
-## Agent environment
+## 功能
 
-This repository uses:
+- 创建 1～80 字的单一方案，并分享到微信群
+- 三档匿名回答；每个微信身份每个版本只能回答一次
+- 至少 4 人回答后才输出 `PASS`、`ADJUST` 或 `BLOCKED`
+- 修改方案生成新版本，旧版立即停止收集，新版不继承答案
+- `PASS` 后由发起人显式确认；创建 48 小时后自动过期
+- 回答与身份去重记录分表保存，分别在关闭 24 小时后、提交 7 天后清理
 
-- `AGENTS.md` — repository-level agent rules
-- `.agents/skills/` — reusable Agent skills
-- `.codex/agents/` — Codex subagent definitions
+项目包含原生微信小程序（`miniprogram/`）和 Node.js 服务端（`server/`），运行环境为 Node.js 26 或更新版本，无第三方运行时依赖。
 
-## Development status
+## 本地验证
 
-Project scaffold initialized. Product-specific implementation has not started yet.
+```bash
+npm test
+npm run dev
+```
 
-## Repository rules
+`npm run dev` 在 `127.0.0.1:3000` 启动服务，并开启仅供本地 API 测试的 `/__dev/auth`。小程序本身始终走 `wx.login` 和服务端微信凭证交换；联调小程序时仍需配置真实 AppID 和微信密钥。生产环境禁止开发登录。
 
-Before making changes, agents should read `AGENTS.md` and follow the configured
-skills, verification workflow, review requirements, and final gate.
+## 生产配置
+
+复制 [.env.example](.env.example)，填入微信小程序的 AppID、AppSecret 和三把各不相同、至少 32 字符的随机服务端密钥。不要提交填好的 `.env`。启动时可使用：
+
+```bash
+node --env-file=.env server/index.js
+```
+
+服务端默认监听 `127.0.0.1:3000`；可用 `HOST`、`PORT` 调整。`DB_PATH` 默认为 `./data.sqlite`，生产环境应指向持久磁盘。用反向代理或负载均衡提供 HTTPS，并确保代理日志不记录授权头、匿名回答请求体或含分享令牌的路径。
+
+打开 [project.config.json](project.config.json)，将 `touristappid` 换成真实小程序 AppID。把 [miniprogram/config.js](miniprogram/config.js) 中的 `RELEASE_BASE_URL` 换成实际 HTTPS API 域名，并在微信公众平台配置该域名为 `request` 合法域名。本地开发工具若使用 HTTP 地址，需要按微信开发工具的本地调试设置处理域名校验。
+
+确认后、48 小时有效期内，旧分享链接仅能只读展示确认卡，不能继续回答；过期后链接只返回结束状态，不提供方案正文或历史行动信号。服务端在每次请求及每小时执行清理。
+
+## 验证限制
+
+当前环境没有微信开发者工具或真实微信小程序账号，因此真机 `wx.login`、微信群分享、合法域名及 HTTPS 部署链路尚未验证。发布前需在微信开发者工具和真机上完成这部分验收。

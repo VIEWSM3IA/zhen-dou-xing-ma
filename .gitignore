@@ -3,3 +3,5 @@ node_modules/
 miniapp/config.local.js
 coverage/
 *.log
+data.sqlite*
+project.private.config.json

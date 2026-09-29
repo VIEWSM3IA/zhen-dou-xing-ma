@@ -1,0 +1,140 @@
+page {
+  min-height: 100%;
+  background: #f7f8fa;
+  color: #15181d;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  border-radius: 24rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 96rpx;
+}
+
+button::after {
+  border: 0;
+}
+
+.page-shell {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 40rpx 32rpx 64rpx;
+}
+
+.eyebrow {
+  margin-bottom: 14rpx;
+  color: #737a84;
+  font-size: 24rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+}
+
+.page-title {
+  margin: 0;
+  color: #11151a;
+  font-size: 48rpx;
+  font-weight: 700;
+  line-height: 1.22;
+}
+
+.page-subtitle {
+  margin-top: 18rpx;
+  color: #68707b;
+  font-size: 28rpx;
+  line-height: 1.65;
+}
+
+.card {
+  margin-top: 36rpx;
+  padding: 32rpx;
+  border: 1rpx solid #e6e9ed;
+  border-radius: 28rpx;
+  background: #ffffff;
+  box-shadow: 0 10rpx 30rpx rgba(21, 24, 29, 0.04);
+}
+
+.primary-button {
+  width: 100%;
+  margin-top: 28rpx;
+  background: #171a1f;
+  color: #ffffff;
+}
+
+.primary-button[disabled] {
+  background: #c7cbd1;
+  color: #ffffff;
+}
+
+.secondary-button {
+  width: 100%;
+  margin-top: 20rpx;
+  border: 1rpx solid #dfe3e8;
+  background: #ffffff;
+  color: #171a1f;
+}
+
+.ghost-button {
+  width: 100%;
+  margin-top: 20rpx;
+  background: transparent;
+  color: #4f5864;
+}
+
+.state-card {
+  margin-top: 48rpx;
+  padding: 40rpx 32rpx;
+  border: 1rpx solid #e5e8ec;
+  border-radius: 28rpx;
+  background: #ffffff;
+  text-align: center;
+}
+
+.state-icon {
+  display: flex;
+  width: 88rpx;
+  height: 88rpx;
+  margin: 0 auto 24rpx;
+  align-items: center;
+  justify-content: center;
+  border-radius: 44rpx;
+  background: #f0f2f5;
+  color: #171a1f;
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+.state-title {
+  color: #171a1f;
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.state-copy {
+  margin-top: 14rpx;
+  color: #737a84;
+  font-size: 27rpx;
+  line-height: 1.65;
+}
+
+.error-box {
+  margin-top: 24rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 20rpx;
+  background: #fff1f0;
+  color: #9f2c27;
+  font-size: 26rpx;
+  line-height: 1.55;
+}
+
+.inline-meta {
+  color: #8b929b;
+  font-size: 24rpx;
+}
+
+.safe-bottom {
+  height: calc(env(safe-area-inset-bottom) + 16rpx);
+}

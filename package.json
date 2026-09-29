@@ -1,0 +1,12 @@
+{
+  "name": "zhen-dou-xing-ma",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development DEV_AUTH_ENABLED=1 node server/index.js",
+    "test": "node --test"
+  }
+}

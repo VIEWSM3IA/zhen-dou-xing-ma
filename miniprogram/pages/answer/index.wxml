@@ -1,0 +1,110 @@
+<view class="page-shell">
+  <block wx:if="{{loading}}">
+    <view class="state-card">
+      <view class="state-icon">···</view>
+      <view class="state-title">正在打开方案</view>
+      <view class="state-copy">只会加载当前最新版本。</view>
+    </view>
+  </block>
+
+  <block wx:elif="{{lifecycle == 'EXPIRED' && !content}}">
+    <view class="state-card">
+      <view class="state-icon">–</view>
+      <view class="state-title">这次确认已经结束</view>
+      <view class="state-copy">链接已过期，不再展示历史结果。</view>
+    </view>
+  </block>
+
+  <block wx:elif="{{error && !content}}">
+    <view class="state-card">
+      <view class="state-icon">!</view>
+      <view class="state-title">暂时打不开</view>
+      <view class="state-copy">{{error}}</view>
+      <button class="secondary-button" bindtap="retry">重试</button>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view wx:if="{{isUpdated}}" class="update-banner">
+      方案已更新，已自动切到 V{{version}}
+    </view>
+
+    <view class="eyebrow">V{{version}} · 匿名确认</view>
+    <view class="page-title">TA 想确认一下</view>
+
+    <view class="card proposal-card">
+      <view class="proposal-content">{{content}}</view>
+    </view>
+
+    <view class="privacy-promise">放心说实话。发起人和其他人都看不到你的具体选择。</view>
+
+    <block wx:if="{{lifecycle == 'OPEN' && !submitted}}">
+      <view class="choice-heading">选一个最接近真实情况的回答</view>
+      <view class="choice-list">
+        <button
+          wx:for="{{options}}"
+          wx:key="value"
+          class="choice-card {{selected == item.value ? 'choice-card--selected' : ''}}"
+          data-value="{{item.value}}"
+          aria-label="{{item.label}}，{{item.hint}}"
+          bindtap="choose"
+        >
+          <view class="choice-main">
+            <view class="choice-label">{{item.label}}</view>
+            <view class="choice-hint">{{item.hint}}</view>
+          </view>
+          <view class="choice-dot">
+            <view wx:if="{{selected == item.value}}" class="choice-dot-inner"></view>
+          </view>
+        </button>
+      </view>
+
+      <view wx:if="{{error}}" class="error-box">{{error}}</view>
+
+      <button
+        class="primary-button"
+        loading="{{submitting}}"
+        disabled="{{!selected || submitting}}"
+        bindtap="submit"
+      >
+        提交回答
+      </button>
+      <view class="privacy-note">提交后本版本锁定，不能修改。</view>
+    </block>
+
+    <block wx:elif="{{lifecycle == 'ANSWERED' || submitted}}">
+      <view class="state-card compact-state">
+        <view class="state-icon">✓</view>
+        <view class="state-title">已匿名提交</view>
+        <view class="state-copy">你已经匿名确认过这个方案。发起人看不到你的具体选择。</view>
+      </view>
+      <button class="secondary-button" bindtap="goBack">回到微信</button>
+    </block>
+
+    <block wx:elif="{{lifecycle == 'CONFIRMED'}}">
+      <view class="state-card compact-state">
+        <view class="state-icon">✓</view>
+        <view class="state-title">这个方案已经确认</view>
+        <view class="state-copy">V{{version}} 已成为最终方案，不再接受回答。</view>
+      </view>
+    </block>
+
+    <block wx:elif="{{lifecycle == 'EXPIRED'}}">
+      <view class="state-card compact-state">
+        <view class="state-icon">–</view>
+        <view class="state-title">这个方案已经过期</view>
+        <view class="state-copy">链接已停止收集回答，请让发起人重新发起。</view>
+      </view>
+    </block>
+
+    <block wx:else>
+      <view class="state-card compact-state">
+        <view class="state-icon">!</view>
+        <view class="state-title">当前不能回答</view>
+        <view class="state-copy">方案状态已经变化，请稍后刷新。</view>
+      </view>
+    </block>
+  </block>
+
+  <view class="safe-bottom"></view>
+</view>

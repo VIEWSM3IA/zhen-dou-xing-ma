@@ -1,0 +1,11 @@
+{
+  "description": "真都行吗？微信小程序 V0.1",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "miniprogram/",
+  "appid": "touristappid",
+  "projectname": "zhen-dou-xing-ma",
+  "setting": {
+    "urlCheck": false,
+    "es6": true
+  }
+}

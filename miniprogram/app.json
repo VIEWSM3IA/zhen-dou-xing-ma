@@ -1,0 +1,18 @@
+{
+  "pages": [
+    "pages/create/index",
+    "pages/answer/index",
+    "pages/result/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "真都行吗？",
+    "navigationBarBackgroundColor": "#F7F8FA",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F7F8FA",
+    "backgroundTextStyle": "light"
+  },
+  "networkTimeout": {
+    "request": 12000
+  },
+  "lazyCodeLoading": "requiredComponents"
+}

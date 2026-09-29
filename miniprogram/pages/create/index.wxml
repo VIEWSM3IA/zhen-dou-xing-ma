@@ -1,0 +1,55 @@
+<view class="page-shell">
+  <block wx:if="{{!created}}">
+    <view class="eyebrow">{{mode == 'revise' ? '修订方案' : '发起确认'}}</view>
+    <view class="page-title">{{mode == 'revise' ? '把方案改清楚，再确认一次' : '真都行吗？'}}</view>
+    <view class="page-subtitle">
+      {{mode == 'revise' ? '新版本会替代旧版本，之前的回答不会带过来。' : '有些“都行”，只是不想扫兴。把已经定得差不多的方案发给大家，匿名确认一下。'}}
+    </view>
+
+    <view class="card editor-card">
+      <textarea
+        class="proposal-input"
+        maxlength="80"
+        value="{{draft}}"
+        placeholder="例如：周六 18:30 在太古里吃饭，之后看 20:30 的电影。"
+        placeholder-class="proposal-placeholder"
+        auto-height
+        cursor-spacing="24"
+        bindinput="onInput"
+      />
+      <view class="editor-meta">
+        <text>{{mode == 'revise' ? 'V' + version + ' → 新版本' : '1–80 字'}}</text>
+        <text>{{charCount}}/80</text>
+      </view>
+    </view>
+
+    <view wx:if="{{error}}" class="error-box">{{error}}</view>
+
+    <button
+      class="primary-button"
+      loading="{{submitting}}"
+      disabled="{{submitting || !draft || missingLocalShareInfo}}"
+      bindtap="submit"
+    >
+      {{mode == 'revise' ? '改一下再问一次' : '问问大家是不是真都行'}}
+    </button>
+  </block>
+
+  <block wx:else>
+    <view class="eyebrow">{{mode == 'revise' ? '新版本已发布' : '方案已创建'}}</view>
+    <view class="page-title">现在只需要发到群里</view>
+    <view class="page-subtitle">回答者看不到聚合结果，也看不到其他人的选择。</view>
+
+    <view class="card share-card">
+      <view class="share-version">V{{version}}</view>
+      <view class="share-content">{{content}}</view>
+      <view class="share-note">每个人本版本仅可提交一次</view>
+    </view>
+
+    <button class="primary-button" open-type="share">发到群里</button>
+    <button class="secondary-button" bindtap="goResult">先自己看看</button>
+    <button class="ghost-button" bindtap="editAgain">继续修订</button>
+  </block>
+
+  <view class="safe-bottom"></view>
+</view>

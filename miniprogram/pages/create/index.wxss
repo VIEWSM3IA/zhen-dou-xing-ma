@@ -1,0 +1,53 @@
+.editor-card {
+  padding-bottom: 22rpx;
+}
+
+.proposal-input {
+  width: 100%;
+  min-height: 220rpx;
+  box-sizing: border-box;
+  color: #15181d;
+  font-size: 34rpx;
+  line-height: 1.6;
+}
+
+.proposal-placeholder {
+  color: #a4aab2;
+}
+
+.editor-meta {
+  display: flex;
+  margin-top: 22rpx;
+  justify-content: space-between;
+  color: #9197a0;
+  font-size: 24rpx;
+}
+
+.share-card {
+  position: relative;
+  padding-top: 76rpx;
+}
+
+.share-version {
+  position: absolute;
+  top: 28rpx;
+  left: 32rpx;
+  color: #7a818b;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+.share-content {
+  color: #11151a;
+  font-size: 38rpx;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.share-note {
+  margin-top: 32rpx;
+  padding-top: 24rpx;
+  border-top: 1rpx solid #eef0f2;
+  color: #858c95;
+  font-size: 25rpx;
+}

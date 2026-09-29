@@ -1,0 +1,79 @@
+<view class="page-shell">
+  <block wx:if="{{loading}}">
+    <view class="state-card">
+      <view class="state-icon">···</view>
+      <view class="state-title">正在读取行动信号</view>
+      <view class="state-copy">这里只展示结论，不展示人数和个人回答。</view>
+    </view>
+  </block>
+
+  <block wx:elif="{{error && !status}}">
+    <view class="state-card">
+      <view class="state-icon">!</view>
+      <view class="state-title">暂时无法查看</view>
+      <view class="state-copy">{{error}}</view>
+      <button class="secondary-button" bindtap="retry">重试</button>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="eyebrow">V{{version}} · 发起人结果</view>
+    <view class="page-title">下一步怎么做</view>
+    <view class="page-subtitle">不展示票数，不展示谁选了什么，只给你一个行动信号。</view>
+
+    <view wx:if="{{status != 'EXPIRED'}}" class="card proposal-card">
+      <view class="proposal-caption">当前方案</view>
+      <view class="proposal-content">{{content}}</view>
+    </view>
+
+    <view class="signal-card signal-card--{{statusMeta.tone}}">
+      <view class="signal-label">{{statusMeta.label}}</view>
+      <view class="signal-title">{{statusMeta.title}}</view>
+      <view class="signal-copy">{{statusMeta.copy}}</view>
+    </view>
+
+    <view wx:if="{{error}}" class="error-box">{{error}}</view>
+
+    <button
+      wx:if="{{status == 'PASS'}}"
+      class="primary-button"
+      loading="{{confirming}}"
+      disabled="{{confirming}}"
+      bindtap="confirm"
+    >
+      确认为最终方案
+    </button>
+
+    <button
+      wx:if="{{status == 'PASS'}}"
+      class="secondary-button"
+      bindtap="revise"
+    >修改后再确认</button>
+
+    <button
+      wx:if="{{status == 'ADJUST' || status == 'BLOCKED'}}"
+      class="primary-button"
+      bindtap="revise"
+    >
+      修订方案
+    </button>
+
+    <button
+      wx:if="{{status == 'WAITING' && shareToken}}"
+      class="primary-button"
+      open-type="share"
+    >
+      继续分享
+    </button>
+
+    <button
+      wx:if="{{status == 'CONFIRMED' && shareToken}}"
+      class="secondary-button"
+      open-type="share"
+    >
+      分享确认方案
+    </button>
+  </block>
+
+  <view class="safe-bottom"></view>
+</view>
